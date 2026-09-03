@@ -20,6 +20,8 @@ def get_random_backend_key():
     return random.choice(keys)
 
 
+MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+
 generation_config = {
     "temperature": 1,
     "top_p": 0.95,
@@ -168,17 +170,24 @@ def translate_proxy(req: TranslateRequest, x_license_key: str = Header(None), x_
                     translated_text = req.srt_content.replace("[Speaker 1]", "[Speaker 1] [Test DUMMY]")
                 else:
                     client = genai.Client(api_key=backend_key)
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=req.srt_content,
-                        config=types.GenerateContentConfig(
-                            temperature=1,
-                            top_p=0.95,
-                            top_k=40,
-                            max_output_tokens=8192,
-                            system_instruction="Bạn là chuyên gia dịch phụ đề. Dịch sang tiếng Việt, giữ nguyên cấu trúc SRT, không thêm markdown. TUYỆT ĐỐI GIỮ NGUYÊN các thẻ [Speaker 1], [Speaker 2]... ở đầu câu nếu có, KHÔNG ĐƯỢC XÓA HOẶC DỊCH CHÚNG."
-                        )
-                    )
+                    for model_name in MODELS:
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=req.srt_content,
+                                config=types.GenerateContentConfig(
+                                    temperature=1,
+                                    top_p=0.95,
+                                    top_k=40,
+                                    max_output_tokens=8192,
+                                    system_instruction="Bạn là chuyên gia dịch phụ đề. Dịch sang tiếng Việt, giữ nguyên cấu trúc SRT, không thêm markdown. TUYỆT ĐỐI GIỮ NGUYÊN các thẻ [Speaker 1], [Speaker 2]... ở đầu câu nếu có, KHÔNG ĐƯỢC XÓA HOẶC DỊCH CHÚNG."
+                                )
+                            )
+                            break
+                        except Exception as e:
+                            last_err = e
+                    else:
+                        raise last_err
                     translated_text = response.text
                 success = True
                 break
@@ -253,26 +262,33 @@ async def transcribe_proxy(
                 else:
                     client = genai.Client(api_key=backend_key)
                     gemini_audio = client.files.upload(file=temp_file_path)
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=["Transcribe this audio verbatim with speaker diarization and precise timestamps.", gemini_audio],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema={
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "start_time": {"type": "string", "description": "Thời gian bắt đầu (VD: 00:01)"},
-                                        "end_time": {"type": "string", "description": "Thời gian kết thúc (VD: 00:05)"},
-                                        "speaker": {"type": "string", "description": "Người nói (VD: Speaker 1)"},
-                                        "transcript": {"type": "string", "description": "Nội dung phiên âm chính xác"},
-                                    },
-                                    "required": ["start_time", "end_time", "speaker", "transcript"],
-                                },
-                            }
-                        )
-                    )
+                    for model_name in MODELS:
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=["Transcribe this audio verbatim with speaker diarization and precise timestamps.", gemini_audio],
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    response_schema={
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "start_time": {"type": "string", "description": "Thời gian bắt đầu (VD: 00:01)"},
+                                                "end_time": {"type": "string", "description": "Thời gian kết thúc (VD: 00:05)"},
+                                                "speaker": {"type": "string", "description": "Người nói (VD: Speaker 1)"},
+                                                "transcript": {"type": "string", "description": "Nội dung phiên âm chính xác"},
+                                            },
+                                            "required": ["start_time", "end_time", "speaker", "transcript"],
+                                        },
+                                    }
+                                )
+                            )
+                            break
+                        except Exception as e:
+                            last_err = e
+                    else:
+                        raise last_err
                     
                     try:
                         client.files.delete(name=gemini_audio.name)
@@ -334,8 +350,13 @@ def metadata_proxy(req: MetadataRequest, x_license_key: str = Header(None), x_hw
     try:
         backend_key = get_random_backend_key()
         client = genai.Client(api_key=backend_key)
-        resp = client.models.generate_content(model="gemini-3.6-flash", contents=req.prompt)
-        return {"status": "success", "result": resp.text}
+        for model_name in MODELS:
+            try:
+                resp = client.models.generate_content(model=model_name, contents=req.prompt)
+                return {"status": "success", "result": resp.text}
+            except:
+                pass
+        raise Exception("Tất cả models đều nghẽn.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi AI Server: {str(e)}")
 
